@@ -1,0 +1,53 @@
+name: Build hotspot tiles
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install osmium
+        run: sudo apt-get update && sudo apt-get install -y osmium-tool
+
+      - name: Download OSM extracts
+        run: |
+          mkdir -p data
+          curl -fL -o data/algeria.osm.pbf https://download.geofabrik.de/africa/algeria-latest.osm.pbf
+
+      - name: Filter and export WiFi places
+        run: |
+          for name in algeria; do
+            osmium tags-filter "data/$name.osm.pbf" nwr/internet_access=wlan,yes -o "data/$name-wifi.osm.pbf" --overwrite
+            osmium export "data/$name-wifi.osm.pbf" -o "data/$name.geojsonseq" -f geojsonseq --add-unique-id=type_id --overwrite
+          done
+
+      - name: Build tiles
+        run: python3 scripts/build_tiles.py --out site data/algeria.geojsonseq
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
