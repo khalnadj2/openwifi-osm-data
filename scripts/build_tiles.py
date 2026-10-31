@@ -74,6 +74,7 @@ def build(paths: list[pathlib.Path], out: pathlib.Path) -> int:
         key = tile_for(place["lat"], place["lon"])
         tiles.setdefault(key, {})[place["id"]] = place
 
+    out.mkdir(parents=True, exist_ok=True)
     tiles_dir = out / "tiles" / str(ZOOM)
     for (x, y), places in tiles.items():
         target = tiles_dir / str(x) / f"{y}.json"
@@ -85,6 +86,8 @@ def build(paths: list[pathlib.Path], out: pathlib.Path) -> int:
         )
 
     total = sum(len(v) for v in tiles.values())
+    if total == 0:
+        raise SystemExit("no WiFi places found in the input; refusing to publish empty data")
     manifest = {
         "zoom": ZOOM,
         "generated": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
