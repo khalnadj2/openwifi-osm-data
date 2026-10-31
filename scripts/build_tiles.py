@@ -47,7 +47,7 @@ def place_from(feature: dict) -> dict | None:
     props = feature.get("properties") or {}
     lat, lon = point
     return {
-        "id": props.get("@id", ""),
+        "id": str(props.get("@id") or feature.get("id") or f"{lat:.6f},{lon:.6f}"),
         "name": props.get("name", ""),
         "internet_access": props.get("internet_access", ""),
         "fee": props.get("fee", ""),
@@ -67,9 +67,13 @@ def read_features(paths: list[pathlib.Path]):
 
 def build(paths: list[pathlib.Path], out: pathlib.Path) -> int:
     tiles: dict[tuple[int, int], dict[str, dict]] = {}
+    read = 0
     for feature in read_features(paths):
+        read += 1
+        if read == 1:
+            print(f"first feature keys: {sorted(feature)} properties: {sorted(feature.get('properties') or {})}", file=sys.stderr)
         place = place_from(feature)
-        if place is None or not place["id"]:
+        if place is None:
             continue
         key = tile_for(place["lat"], place["lon"])
         tiles.setdefault(key, {})[place["id"]] = place
@@ -85,6 +89,7 @@ def build(paths: list[pathlib.Path], out: pathlib.Path) -> int:
             encoding="utf-8",
         )
 
+    print(f"features read: {read}", file=sys.stderr)
     total = sum(len(v) for v in tiles.values())
     if total == 0:
         raise SystemExit("no WiFi places found in the input; refusing to publish empty data")
