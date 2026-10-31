@@ -31,8 +31,8 @@ jobs:
       - name: Filter and export WiFi places
         run: |
           for name in algeria; do
-            osmium tags-filter "data/$name.osm.pbf" nwr/internet_access=wlan,yes -o "data/$name-wifi.osm.pbf" --overwrite
-            osmium export "data/$name-wifi.osm.pbf" -o "data/$name.geojsonseq" -f geojsonseq --add-unique-id=type_id --overwrite
+            osmium tags-filter "data/$name.osm.pbf" nwr/internet_access=wlan,yes,wifi -o "data/$name-wifi.osm.pbf" --overwrite
+            osmium export "data/$name-wifi.osm.pbf" -o "data/$name.geojsonseq" -f geojsonseq --attributes=type,id --overwrite
           done
 
       - name: Build tiles

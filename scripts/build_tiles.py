@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build per-tile JSON files of free WiFi places from OSM GeoJSON-seq features."""
+"""Build per-tile JSON files of WiFi places from OSM GeoJSON-seq features (osmium export --attributes=type,id)."""
 
 import argparse
 import datetime
@@ -9,7 +9,9 @@ import pathlib
 import sys
 
 ZOOM = 12
+FORMAT = 2
 ATTRIBUTION = "© OpenStreetMap contributors, ODbL 1.0 — https://www.openstreetmap.org/copyright"
+OSM_TYPES = {"node", "way", "relation"}
 
 
 def tile_for(lat: float, lon: float, zoom: int = ZOOM) -> tuple[int, int]:
@@ -40,17 +42,35 @@ def centroid(geometry: dict) -> tuple[float, float] | None:
     return lat, lon
 
 
-def place_from(feature: dict) -> dict | None:
-    point = centroid(feature.get("geometry") or {})
-    if point is None:
-        return None
+def ref_of(feature: dict) -> str | None:
     props = feature.get("properties") or {}
+    kind = props.get("@type")
+    ident = props.get("@id")
+    if kind in OSM_TYPES and ident is not None:
+        return f"{kind}/{ident}"
+    return None
+
+
+def address_of(tags: dict) -> str:
+    street = " ".join(v for v in (tags.get("addr:housenumber"), tags.get("addr:street")) if v)
+    return ", ".join(v for v in (street, tags.get("addr:city")) if v)
+
+
+def place_from(feature: dict) -> dict | None:
+    ref = ref_of(feature)
+    point = centroid(feature.get("geometry") or {})
+    if ref is None or point is None:
+        return None
+    tags = feature.get("properties") or {}
     lat, lon = point
     return {
-        "id": str(props.get("@id") or feature.get("id") or f"{lat:.6f},{lon:.6f}"),
-        "name": props.get("name", ""),
-        "internet_access": props.get("internet_access", ""),
-        "fee": props.get("fee", ""),
+        "ref": ref,
+        "name": tags.get("name", ""),
+        "ssid": tags.get("internet_access:ssid", ""),
+        "venue": tags.get("amenity") or tags.get("tourism") or tags.get("shop") or "",
+        "address": address_of(tags),
+        "internet_access": tags.get("internet_access", ""),
+        "fee": tags.get("internet_access:fee", ""),
         "lat": round(lat, 6),
         "lon": round(lon, 6),
     }
@@ -67,16 +87,23 @@ def read_features(paths: list[pathlib.Path]):
 
 def build(paths: list[pathlib.Path], out: pathlib.Path) -> int:
     tiles: dict[tuple[int, int], dict[str, dict]] = {}
-    read = 0
+    read = skipped = 0
     for feature in read_features(paths):
         read += 1
         if read == 1:
-            print(f"first feature keys: {sorted(feature)} properties: {sorted(feature.get('properties') or {})}", file=sys.stderr)
+            props = feature.get("properties") or {}
+            print(f"first feature properties: {sorted(props)}", file=sys.stderr)
         place = place_from(feature)
         if place is None:
+            skipped += 1
             continue
         key = tile_for(place["lat"], place["lon"])
-        tiles.setdefault(key, {})[place["id"]] = place
+        tiles.setdefault(key, {})[place["ref"]] = place
+
+    total = sum(len(v) for v in tiles.values())
+    print(f"features read: {read}, skipped without type or position: {skipped}", file=sys.stderr)
+    if total == 0:
+        raise SystemExit("no WiFi places found in the input; refusing to publish empty data")
 
     out.mkdir(parents=True, exist_ok=True)
     tiles_dir = out / "tiles" / str(ZOOM)
@@ -84,16 +111,14 @@ def build(paths: list[pathlib.Path], out: pathlib.Path) -> int:
         target = tiles_dir / str(x) / f"{y}.json"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(
-            json.dumps({"attribution": ATTRIBUTION, "places": sorted(places.values(), key=lambda p: p["id"])},
+            json.dumps({"format": FORMAT, "attribution": ATTRIBUTION,
+                        "places": sorted(places.values(), key=lambda p: p["ref"])},
                        ensure_ascii=False, separators=(",", ":")),
             encoding="utf-8",
         )
 
-    print(f"features read: {read}", file=sys.stderr)
-    total = sum(len(v) for v in tiles.values())
-    if total == 0:
-        raise SystemExit("no WiFi places found in the input; refusing to publish empty data")
     manifest = {
+        "format": FORMAT,
         "zoom": ZOOM,
         "generated": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "attribution": ATTRIBUTION,
